@@ -205,6 +205,9 @@ const createBuildCacheFixture = async (): Promise<string> => {
     "scripts/clean-build-output.mjs",
     "scripts/generate-package-metadata.mjs",
     "scripts/lib/generated-file.mjs",
+    "scripts/lib/verifier-source-loader.mjs",
+    "src/domain/skillManifest.ts",
+    "src/domain/result.ts",
     ".agents/skills/reverse-engineer-anything/SKILL.md",
     "src/generatedPackageMetadata.ts",
   ];
@@ -231,7 +234,7 @@ const createBuildCacheFixture = async (): Promise<string> => {
 await writeFile("resource-controls.json", JSON.stringify(Object.fromEntries(["GOMAXPROCS", "GOMEMLIMIT", "UV_THREADPOOL_SIZE", "REA_TEST_UNLISTED_ENV"].map((name) => [name, process.env[name] ?? null]))));
 await mkdir("dist", { recursive: true });
 await writeFile("dist/cache-fixture.js", "built");
-await writeFile("dist/catalogIdentity.js", "export const CATALOG_IDENTITY = { counts: { mcp_tools: 1 } };\\n");
+await writeFile("dist/catalogIdentity.js", "export const FULL_CATALOG_IDENTITY = { counts: { mcp_tools: 1 } };\\n");
 await writeFile("dist/identity.js", ${JSON.stringify(`export const PRODUCT_IDENTITY = ${JSON.stringify({ packageSpecifier: `${packageJson.name}@latest`, registrationPackageSpecifier: `${packageJson.name}@${packageJson.version}` })};\n`)});
 `,
   );
