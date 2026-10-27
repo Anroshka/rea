@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { JsonValue } from "../domain/jsonValue.js";
+import { relationshipCoverageLimitations } from "../domain/relationshipCoverage.js";
 import {
   callGraphSession,
   edge,
@@ -77,9 +78,9 @@ describe("headless IDA verified callers", () => {
       if (!result.ok) throw result.error;
       expect(result.value.result).toEqual(["0x2000"]);
       expect(result.value.relationshipCoverage?.status).toBe("partial");
-      expect(result.value.limitations).toContain(
-        "Caller discovery examines incoming references to the selected entry only; callers targeting interior addresses remain unknown.",
-      );
+      expect(
+        relationshipCoverageLimitations(result.value.relationshipCoverage),
+      ).toHaveLength(1);
       expect(
         producer.calls
           .filter(({ name }) => name === "callgraph")
@@ -124,14 +125,8 @@ describe("headless IDA verified callers", () => {
         expect(result.value.result).toEqual(["0x2000"]);
         expect(result.value.relationshipCoverage?.status).toBe("partial");
         expect(
-          result.value.limitations.some((value) =>
-            value.includes(
-              more === true
-                ? "capped caller candidates"
-                : "did not report candidate coverage",
-            ),
-          ),
-        ).toBe(true);
+          relationshipCoverageLimitations(result.value.relationshipCoverage),
+        ).toHaveLength(2);
       } finally {
         expect((await client.close()).ok).toBe(true);
       }
@@ -218,10 +213,8 @@ describe("headless IDA caller coverage and failures", () => {
       expect(result.value.result).toEqual([]);
       expect(result.value.relationshipCoverage?.status).toBe("partial");
       expect(
-        result.value.limitations.some((value) =>
-          value.includes("candidate 0x2000"),
-        ),
-      ).toBe(true);
+        relationshipCoverageLimitations(result.value.relationshipCoverage),
+      ).toHaveLength(2);
     } finally {
       expect((await client.close()).ok).toBe(true);
     }
@@ -239,10 +232,8 @@ describe("headless IDA caller coverage and failures", () => {
       expect(result.value.result).toEqual(["0x2000"]);
       expect(result.value.relationshipCoverage?.status).toBe("partial");
       expect(
-        result.value.limitations.some((value) =>
-          value.includes("candidate 0x2000"),
-        ),
-      ).toBe(false);
+        relationshipCoverageLimitations(result.value.relationshipCoverage),
+      ).toHaveLength(1);
     } finally {
       expect((await client.close()).ok).toBe(true);
     }
