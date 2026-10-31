@@ -219,7 +219,13 @@ it.each([
   },
 ])(
   "checks real-verifier values for $empty / omitted more=$omitMore / oracles=$oracles",
-  async (scenario) => {
+  async (scenario: {
+    empty: string[];
+    omitMore: boolean;
+    oracles: boolean;
+    passed: boolean;
+    expectedCaller?: string;
+  }) => {
     const { empty, omitMore, oracles, passed } = scenario;
     const expectedCaller =
       "expectedCaller" in scenario ? scenario.expectedCaller : undefined;
@@ -266,6 +272,7 @@ it.each([
           failure: z
             .object({ phase: z.string(), message: z.string() })
             .optional(),
+          failed_cli: z.object({ stdout: z.string() }).optional(),
         })
         .parse(JSON.parse(await readFile(reportPath, "utf8")));
       expect(report.passed, result.stdout.text + result.stderr.text).toBe(
@@ -277,7 +284,37 @@ it.each([
         expect(report.failure?.message).toContain(
           "independently expected caller",
         );
-      }
+      } else if (empty.includes("list_funcs"))
+        expect(report.failure).toEqual({
+          phase: "production MCP list_procedures",
+          message: "list_procedures omitted the resolved procedure.",
+        });
+      else if (oracles && empty.includes("find_regex"))
+        expect(report.failure).toEqual({
+          phase: "production MCP list_strings",
+          message: "list_strings omitted the expected literal.",
+        });
+      else if (oracles && empty.includes("xrefs_to"))
+        expect(report.failure).toEqual({
+          phase: "production MCP xrefs",
+          message: "xrefs omitted the expected source address.",
+        });
+      else if (omitMore) {
+        expect(report.failure?.phase).toBe("production CLI function analysis");
+        expect(JSON.parse(report.failed_cli!.stdout)).toMatchObject({
+          code: "unreadable_output",
+          details: {
+            partial_observation: {
+              normalized_result: {
+                target_binding: {
+                  reason:
+                    "Native IDA callees omitted an explicit truncation marker.",
+                },
+              },
+            },
+          },
+        });
+      } else expect(report.failure).toBeUndefined();
       if (!oracles)
         expect(report.unverified).toEqual([
           "String inventory/search correctness: no independent expected literal supplied.",

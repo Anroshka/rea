@@ -25,6 +25,7 @@ import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type { IdaConfiguration } from "./IdaConfiguration.js";
 import { idaCompatibilityProfile } from "./IdaConfiguration.js";
+import { createIdaDiagnosticRedactor } from "./IdaDiagnosticRedactor.js";
 import type { IdaMcpConnection } from "./IdaMcpConnection.js";
 import { nativeTools } from "./IdaNativeProtocol.js";
 import { readSettledHealth } from "./IdaBusyHealth.js";
@@ -61,7 +62,10 @@ import {
 } from "../artifacts/ArtifactFileOperation.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
-import { analysisClientFailureForOperation } from "../providers/AnalysisClientFailure.js";
+import {
+  analysisClientFailureContext,
+  analysisClientFailureForOperation,
+} from "../providers/AnalysisClientFailure.js";
 
 const legacyTools = [
   "get_metadata",
@@ -474,6 +478,16 @@ export class IdaSessionClient implements AnalysisClient {
   ) {
     const artifactFailure =
       cause instanceof ArtifactReaderFailure ? cause : undefined;
+    // The validated registration owns the exact endpoint spelling. Apply the
+    // same credential exclusions used for upstream transport diagnostics.
+    const endpoint =
+      artifactFailure === undefined && "url" in this.config
+        ? {
+            endpoint: createIdaDiagnosticRedactor(this.config).url(
+              this.config.url,
+            ),
+          }
+        : {};
     if (artifactFailure !== undefined)
       cause = artifactFilePrimaryFacts(artifactFailure).cause;
     let failure: AnalysisError;
@@ -493,7 +507,7 @@ export class IdaSessionClient implements AnalysisClient {
         cause:
           cause.cause === undefined ? options?.signal?.reason : cause.cause,
         capturedOutput: cause.capturedOutput,
-        diagnostics: cause.diagnostics,
+        diagnostics: { ...cause.diagnostics, ...endpoint },
         partialObservation: cause.partialObservation,
         cleanup:
           cause.cleanup ??
@@ -504,21 +518,37 @@ export class IdaSessionClient implements AnalysisClient {
         .bindCleanupDependencies([cause])
         .bindCleanupResourceOwner(cause);
     } else if (
-      cause instanceof AnalysisTimeoutError &&
-      cause.operation !== operation
+      (cause instanceof AnalysisTimeoutError ||
+        cause instanceof AnalysisResourceConstraintError) &&
+      cause.operation === operation &&
+      cause.diagnostics?.startup_operation !== undefined
+    ) {
+      // #start has already attributed this failure and its endpoint; wrapping
+      // it again would replace the original producer cause with an intermediate.
+      failure = cause;
+    } else if (
+      cause instanceof AnalysisTimeoutError ||
+      cause instanceof AnalysisResourceConstraintError
     ) {
       failure = analysisClientFailureForOperation(
         cause,
         "ida",
         operation,
+        endpoint,
       ).bindCleanupResourceOwner(cause);
     } else if (
       cause instanceof ProviderAdapterError &&
       cause.operation === "transport"
     )
       failure = analysisClientFailureForOperation(cause, "ida", operation, {
+        ...endpoint,
         recovery:
           "Check the configured upstream MCP registration and selected target; see docs/ida-provider.md.",
+      }).bindCleanupResourceOwner(cause);
+    else if (cause instanceof AnalysisProtocolError && "endpoint" in endpoint)
+      failure = new AnalysisProtocolError(cause.message, {
+        ...analysisClientFailureContext(cause, "ida", operation),
+        diagnostics: { ...cause.diagnostics, ...endpoint },
       }).bindCleanupResourceOwner(cause);
     else if (cause instanceof AnalysisError) failure = cause;
     else if (cause instanceof z.ZodError)
@@ -531,6 +561,7 @@ export class IdaSessionClient implements AnalysisClient {
       failure = new ProviderAdapterError("ida", operation, {
         cause,
         diagnostics: {
+          ...endpoint,
           reason:
             cause instanceof Error ? cause.message : "Unknown upstream failure",
           recovery:
@@ -639,6 +670,13 @@ export class IdaSessionClient implements AnalysisClient {
       // mutating the cached startup failure.
       throw analysisClientFailureForOperation(cause, "ida", operation, {
         startup_operation: cause.operation,
+        ...("url" in this.config
+          ? {
+              endpoint: createIdaDiagnosticRedactor(this.config).url(
+                this.config.url,
+              ),
+            }
+          : {}),
       }).bindCleanupResourceOwner(cause);
     }
   }
